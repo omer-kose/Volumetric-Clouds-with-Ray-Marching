@@ -1,6 +1,6 @@
 #version 410 core
 
-#define NUM_STEPS 20
+#define NUM_STEPS 30
 #define STEP_SIZE 0.1
 
 in vec2 uv;
@@ -14,10 +14,15 @@ uniform vec3 lower_left;
 uniform vec3 front;
 uniform vec3 right;
 uniform vec3 up;
+uniform float time;
+uniform float lower_limit;
+uniform float upper_limit;
+
+uniform samplerCube skybox;
 
 
 //Scene Properties
-const vec3 sky_color = vec3(0.2, 0.4, 0.69);
+vec3 sky_color = vec3(0.2, 0.4, 0.69);
 const vec3 cloud_color = vec3(1.0);
 
 
@@ -213,7 +218,7 @@ float valueNoise(vec3 p)
 
 float fbm(vec3 p)
 {
-    vec3 q = p;
+    vec3 q = p - vec3(0.1, 0.0, 0.0) * time;;
     int numOctaves = 4;
     float weight = 0.5;
     float ret = 0.0;
@@ -236,14 +241,14 @@ vec3 ray_march(vec3 ro, vec3 rd)
     vec3 p;
     vec3 c = sky_color;
     for(int i = 0; i < NUM_STEPS; ++i)
-    {
+    {    
         //March from back to front
         p = ro + STEP_SIZE * (NUM_STEPS - i) * rd;
         float a = fbm(p);
         c = mix(c, cloud_color, a);
     }
 
-    return c;
+    return clamp(c.rgb, 0.0, 1.0);
 }
 
 vec3 volumetric_march(vec3 ro, vec3 rd)
@@ -269,34 +274,83 @@ vec3 volumetric_march(vec3 ro, vec3 rd)
         }
         
         // March forward a fixed distance
-        depth += max(0.1, 0.02 * depth);
+        depth += max(STEP_SIZE, 0.02 * depth);
     }
     
     return clamp(color.rgb, 0.0, 1.0);
 }
 
+//TERRAIN MARCHING
+
+float height(vec2 p)
+{
+    return sin(p.x) * sin(p.y);
+}
+
+bool terrain_hit(vec3 ro, vec3 rd, inout float resT )
+{
+    float dt = 0.01f;
+    const float mint = 1.0f;
+    const float maxt = 1000.0f;
+    float lh = 0.0f;
+    float ly = 0.0f;
+    for( float t = mint; t < maxt; t += dt )
+    {
+        vec3  p = ro + rd*t;
+        float h = height(p.xz);
+        if( p.y < h )
+        {
+            // interpolate the intersection distance
+            resT = t - dt + dt*(lh-ly)/(p.y-ly-h+lh);
+            return true;
+        }
+        // allow the error to be proportinal to the distance
+        dt = 0.01f*t;
+        lh = h;
+        ly = p.y;
+    }
+    return false;
+}
+
+
+
 void main()
 {
-    vec3 fragment_pos = lower_left + (uv.x * resolution.x) * right + (uv.y * resolution.y) * up;
-    vec3 rd = fragment_pos - camera_pos;
+    //vec3 fragment_pos = lower_left + (uv.x * resolution.x) * right + (uv.y * resolution.y) * up;
+    //vec3 rd = fragment_pos - camera_pos;
     //rd = normalize(rd);
-
-    //vec3 c = ray_march(camera_pos, rd);
-    //FragColor = vec4(c, 0.4);
    
-    //I like this solution better. I have also passed uv coordinates from texture coordinates
-    //Instead of p, uv-0.5 can be used (-0.5 to center the uv values in [0,1])
+    //I have also passed uv coordinates in range [0, 1] as texture coordinates. Positions of the fragments can also be determined in this way
     vec2 aspectRatio = vec2(resolution.x / resolution.y, 1.0);
     vec2 p = aspectRatio * (gl_FragCoord.xy / resolution.xy/2.0 - 0.5);
     
     vec3 ro = camera_pos;
-    mat3 lookAt = mat3(right, up, front);
-    rd = lookAt * normalize(vec3(p, 1.0));
-    vec3 cloud_color = ray_march(ro, rd);
-    
-    // Gamma correction
-    cloud_color = pow(cloud_color, vec3(0.4545));
-    
-    FragColor = vec4(cloud_color, 0.9);
+    mat3 lookAt = mat3(right, up, -front);
+    //Interestingly, on the Windows Machine I tried this gave an incorrect ray origin (as if it was shifted from the center of the render plane)
+    //vec3 rd = lookAt * normalize(vec3(p, 1.0));
+    //This works fine 
+    vec3 ord = lookAt * vec3(aspectRatio * (uv - 0.5), -1.0);
+    vec3 rd = normalize(ord);
+
+
+    sky_color = texture(skybox, ord).xyz;
+
+    float c;
+    bool hit = terrain_hit(ro, rd, c);
+    if(false)
+    {
+        c /= 100;
+        FragColor = vec4(vec3(c), 1.0);
+    }
+    else
+    {
+        vec3 p = ro + ord;
+        vec3 cloud_color = ray_march(ro, rd);
+        // Gamma correction
+        cloud_color = pow(cloud_color, vec3(0.4545));
+        float d_lower = smoothstep(lower_limit - 2, lower_limit, p.y);
+        float d_upper = 1.0 - smoothstep(upper_limit - 2, upper_limit, p.y);
+        FragColor = vec4(cloud_color, d_lower * 0.9);
+    }
     
 }

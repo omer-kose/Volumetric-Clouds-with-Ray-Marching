@@ -25,7 +25,7 @@
 
 
 //Camera
-Camera camera(glm::vec3(0.0f, 0.0f, 0.0f));
+Camera camera(glm::vec3(0.0f, 39.0f, 0.0f));
 float near = 1.0f;
 float far = 1000.0f;
 
@@ -47,6 +47,11 @@ GLuint skyboxTextureID;
 //Quad
 Mesh quadMesh;
 Shader quadShader;
+
+
+//Sky Slab
+float slabLowerLimit = 40.0f;
+float slabUpperLimit = 60.0f;
 
 
 //Texture Loader
@@ -254,7 +259,7 @@ void renderTestRectangle(GLuint VAO, Shader shader)
 	shader.use();
     glm::vec3 camPos = camera.getPosition();
     glm::vec3 lower_left = camPos + near * camera.getFront();
-    lower_left += (SCR_WIDTH / 2.0f) * (-camera.getRight()) + (SCR_HEIGHT/2.0f) *                                                                                      (-camera.getUp());
+    lower_left += (SCR_WIDTH / 2.0f) * (-camera.getRight()) + (SCR_HEIGHT/2.0f) * (-camera.getUp());
     //Uniforms
     shader.setVec2("resolution", glm::vec2(SCR_WIDTH, SCR_HEIGHT));
     shader.setVec3("camera_pos", camPos);
@@ -262,6 +267,9 @@ void renderTestRectangle(GLuint VAO, Shader shader)
     shader.setVec3("right", camera.getRight());
     shader.setVec3("up", camera.getUp());
     shader.setVec3("lower_left", lower_left);
+	shader.setFloat("time", glfwGetTime());
+	shader.setFloat("lower_limit", slabLowerLimit);
+	shader.setFloat("upper_limit", slabUpperLimit);
 	glBindVertexArray(VAO);
 	//total 6 indices since we have triangles
 	glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
