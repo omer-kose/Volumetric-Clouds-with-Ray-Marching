@@ -15,6 +15,7 @@
 #include "Shader.h"
 #include "Camera.h"
 #include "Mesh.h"
+#include "QuaternionCamera.h"
 
 
 
@@ -25,9 +26,11 @@
 
 
 //Camera
-Camera camera(glm::vec3(0.0f, 39.0f, 0.0f));
+//Camera camera(glm::vec3(0.0f, 39.0f, 0.0f));
+QuaternionCamera camera(glm::vec3(0.0f, 39.5f, 0.0f), glm::quat(0.0f, 0.0f, 1.0f, 0.0f));
 float near = 1.0f;
 float far = 1000.0f;
+float fov = 45.0f;
 
 
 //Time parameters
@@ -44,15 +47,20 @@ Shader skyboxShader;
 GLuint skyboxTextureID;
 
 
-//Quad
-Mesh quadMesh;
-Shader quadShader;
+//Screen Size Quad
+GLuint screenSizeQuadMesh;
+Shader screenSizeQuadShader;
 
 
 //Sky Slab
 float slabLowerLimit = 40.0f;
 float slabUpperLimit = 60.0f;
 
+
+//Simulation Properties
+float speed = 1.0f;
+float dTheta = 30.0f;
+bool renderClouds = true;
 
 //Texture Loader
 GLuint loadCubemap(const std::vector<std::string>& faces)
@@ -116,48 +124,56 @@ void processInput(GLFWwindow* window)
 	{
 		glfwSetWindowShouldClose(window, true);
 	}
-
-	int speedUp = 1; //Default
-
-	//If shift is pressed move the camera faster
-	if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS)
-		speedUp = 2;	
-	
-	//Camera movement
+    
+    float dThetaRadians = glm::radians(dTheta);
+	//Camera Transformation
 	if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
-		camera.processKeyboard(FORWARD, deltaTime, speedUp);
+    {
+        speed += deltaTime;
+    }
 	if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
-		camera.processKeyboard(BACKWARD, deltaTime, speedUp);
+    {
+        speed -= deltaTime;
+    }
 	if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
-		camera.processKeyboard(LEFT, deltaTime, speedUp);
+    {
+        camera.roll(deltaTime * dThetaRadians);
+    }
 	if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
-		camera.processKeyboard(RIGHT, deltaTime, speedUp);
-
-
-
-	//Camera y-axis movement
-	if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS)
-		camera.moveCameraUp(deltaTime, speedUp);
-	if (glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS)
-		camera.moveCameraDown(deltaTime, speedUp);
+    {
+        camera.roll(deltaTime * -dThetaRadians);
+    }
+    if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS)
+    {
+        camera.yaw(deltaTime * dThetaRadians);
+    }
+    if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS)
+    {
+        camera.yaw(deltaTime * -dThetaRadians);
+    }
+    if (glfwGetKey(window, GLFW_KEY_U) == GLFW_PRESS)
+    {
+        camera.pitch(deltaTime * dThetaRadians);
+    }
+    if (glfwGetKey(window, GLFW_KEY_J) == GLFW_PRESS)
+    {
+        camera.pitch(deltaTime * -dThetaRadians);
+    }
 
 }
 
-//Callback function for mouse position inputs
-void mouse_callback(GLFWwindow* window, double xPos, double yPos)
+void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods)
 {
-	if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS)
-	{
-		camera.processMouseMovement(xPos, yPos, GL_TRUE);
-	}
-
-	camera.setLastX(xPos);
-	camera.setLastY(yPos);	
+    if(glfwGetKey(window, GLFW_KEY_T) == GLFW_PRESS)
+    {
+        renderClouds = !renderClouds;
+    }
 }
 
-void scroll_callback(GLFWwindow* window, double xOffset, double yOffset)
+
+void moveCamera()
 {
-	camera.processMouseScroll(yOffset);
+    camera.move(camera.front(), deltaTime, speed);
 }
 
 
@@ -195,8 +211,7 @@ int setupDependencies()
 
 	//Register our size callback funtion to GLFW.
 	glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
-	glfwSetCursorPosCallback(window, mouse_callback);
-	glfwSetScrollCallback(window, scroll_callback);
+    glfwSetKeyCallback(window, key_callback);
 
 	//GLFW will capture the mouse and will hide the cursor
 	//glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
@@ -254,19 +269,16 @@ GLuint screenSizeQuad()
 	return VAO;
 }
 
-void renderTestRectangle(GLuint VAO, Shader shader)
+void renderScreenSizeQuad(GLuint VAO, Shader shader)
 {
 	shader.use();
     glm::vec3 camPos = camera.getPosition();
-    glm::vec3 lower_left = camPos + near * camera.getFront();
-    lower_left += (SCR_WIDTH / 2.0f) * (-camera.getRight()) + (SCR_HEIGHT/2.0f) * (-camera.getUp());
     //Uniforms
     shader.setVec2("resolution", glm::vec2(SCR_WIDTH, SCR_HEIGHT));
     shader.setVec3("camera_pos", camPos);
-    shader.setVec3("front", camera.getFront());
-    shader.setVec3("right", camera.getRight());
-    shader.setVec3("up", camera.getUp());
-    shader.setVec3("lower_left", lower_left);
+    shader.setVec3("front", camera.front());
+    shader.setVec3("right", camera.right());
+    shader.setVec3("up", camera.up());
 	shader.setFloat("time", glfwGetTime());
 	shader.setFloat("lower_limit", slabLowerLimit);
 	shader.setFloat("upper_limit", slabUpperLimit);
@@ -296,11 +308,9 @@ void loadScene()
     
     skyboxTextureID = loadCubemap(faces);
     
-    
-    //Quad
-    //quadMesh = Mesh("hw3_support_files/obj/quad.obj");
-    //quadShader = Shader("Shaders/solidColor/solidColor.vert",
-                          //"Shaders/solidColor/solidColor.frag");
+    screenSizeQuadMesh = screenSizeQuad();
+    screenSizeQuadShader = Shader("Shaders/cloudShader/cloud_shader_vertex.glsl",
+                                  "Shaders/cloudShader/cloud_shader_fragment.glsl");
     
 }
 
@@ -308,8 +318,8 @@ void renderSkybox(const Mesh& mesh, Shader& shader)
 {
     glDepthFunc(GL_LEQUAL);
     shader.use();
-    glm::mat4 view = camera.getViewMatrix();
-    glm::mat4 projection = glm::perspective(glm::radians(camera.getFov()), (float)SCR_WIDTH / SCR_HEIGHT, near, far);
+    glm::mat4 view = camera.view();
+    glm::mat4 projection = glm::perspective(glm::radians(fov), (float)SCR_WIDTH / SCR_HEIGHT, near, far);
     glm::mat4 PV = projection * glm::mat4(glm::mat3(view));
     //Set uniforms
     shader.setMat4("PV", PV);
@@ -321,28 +331,20 @@ void renderSkybox(const Mesh& mesh, Shader& shader)
     glDepthFunc(GL_LESS);
 }
 
-void renderQuad(const Mesh& mesh, Shader& shader)
-{
-    shader.use();
-    glm::mat4 view = camera.getViewMatrix();
-    glm::mat4 projection = glm::perspective(glm::radians(camera.getFov()), (float)SCR_WIDTH / SCR_HEIGHT, near, far);
-    //Set uniforms
-    glBindVertexArray(mesh.getVAO());
-    glDrawElements(GL_TRIANGLES, 3 * mesh.getNumTriangles(), GL_UNSIGNED_INT, 0);
-}
 
 void renderScene()
 {
     renderSkybox(skyboxMesh, skyboxShader);
+    if(renderClouds)
+    {
+        renderScreenSizeQuad(screenSizeQuadMesh, screenSizeQuadShader);
+    }
 }
 
 
 int main()
 {
 	setupDependencies();
-    GLuint rect = screenSizeQuad();
-	Shader shader("Shaders/cloudShader/cloud_shader_vertex.glsl",
-                  "Shaders/cloudShader/cloud_shader_fragment.glsl");
     
     loadScene();
 
@@ -354,6 +356,8 @@ int main()
 		updateDeltaTime();
 		// input
 		processInput(window);
+        //Update Camera
+        moveCamera();
 
 		// render
 		// ------
@@ -361,7 +365,6 @@ int main()
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         renderScene();
-        renderTestRectangle(rect, shader);
         
 		// glfw: swap buffers and poll IO events (keys pressed/released, mouse moved etc.)
 		// -------------------------------------------------------------------------------

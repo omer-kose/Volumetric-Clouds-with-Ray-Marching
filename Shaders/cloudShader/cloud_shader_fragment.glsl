@@ -1,6 +1,6 @@
 #version 410 core
 
-#define NUM_STEPS 30
+#define NUM_STEPS 30 //30 is nice
 #define STEP_SIZE 0.1
 
 in vec2 uv;
@@ -10,7 +10,6 @@ out vec4 FragColor;
 //UNIFORMS
 uniform vec2 resolution;
 uniform vec3 camera_pos;
-uniform vec3 lower_left;
 uniform vec3 front;
 uniform vec3 right;
 uniform vec3 up;
@@ -24,6 +23,8 @@ uniform samplerCube skybox;
 //Scene Properties
 vec3 sky_color = vec3(0.2, 0.4, 0.69);
 const vec3 cloud_color = vec3(1.0);
+vec3 sun_dir;
+float sun;
 
 
 //Perlin Noise
@@ -220,21 +221,20 @@ float fbm(vec3 p)
 {
     vec3 q = p - vec3(0.1, 0.0, 0.0) * time;;
     int numOctaves = 4;
-    float weight = 0.5;
+    float lacunarity = 1.2f;
+    float weight = 1.0;
     float ret = 0.0;
-    
+    float frequency = 1.0f;
     // fbm
     for (int i = 0; i < numOctaves; i++)
     {
-        ret += weight * cnoise(q);
+        ret += weight * cnoise(frequency * q);
         q *= 2.0;
         weight *= 0.5;
+        frequency *= lacunarity;
     }
     return clamp(ret, 0.0, 1.0);
 }
-
-
-
 
 vec3 ray_march(vec3 ro, vec3 rd)
 {
@@ -242,13 +242,50 @@ vec3 ray_march(vec3 ro, vec3 rd)
     vec3 c = sky_color;
     for(int i = 0; i < NUM_STEPS; ++i)
     {    
-        //March from back to front
-        p = ro + STEP_SIZE * (NUM_STEPS - i) * rd;
+        //March
+        p = ro + STEP_SIZE * i * rd;
         float a = fbm(p);
         c = mix(c, cloud_color, a);
     }
 
     return clamp(c.rgb, 0.0, 1.0);
+}
+
+
+vec3 lighting(vec3 p, float density, float path_length)
+{
+    float density_light_dir = fbm(p + 0.3 * sun_dir); // sample in light dir
+    float gradient_light_dir = clamp(density - density_light_dir, 0.0, 1.0);
+
+    vec3 lit_color = vec3(0.91, 0.98, 1.0) + vec3(1.0, 0.6, 0.3) * 2.0 * gradient_light_dir;
+    vec3 cloud_albedo = mix( vec3(1.0, 0.95, 0.8), vec3(0.25, 0.3, 0.35), density);
+
+    const float extinction = 0.0003;
+    float transmittance = exp( -extinction * path_length );
+    return mix(sky_color, cloud_albedo * lit_color, transmittance );
+}
+
+vec4 ray_march_clouds(vec3 ro, vec3 rd)
+{
+    vec4 sum = vec4(0.0f);
+    float t = 0.0f;
+    for(int i = 0; i < NUM_STEPS; ++i)
+    {
+        vec3 p = ro + t * rd;
+        if(sum.a > 0.99) break; //opaque
+        float density = fbm(p);
+        if(density > 0.01)
+        {
+            vec3 color_rgb = lighting(p, density, t);
+            float alpha = density * 0.4f;
+            vec4 color = vec4(color_rgb * alpha, alpha);
+            sum += color * (1.0 - sum.a);
+        }
+        
+        t += max(STEP_SIZE, 0.02 * t);
+    }
+    
+    return clamp(sum, 0.0f, 1.0f);
 }
 
 vec3 volumetric_march(vec3 ro, vec3 rd)
@@ -280,49 +317,12 @@ vec3 volumetric_march(vec3 ro, vec3 rd)
     return clamp(color.rgb, 0.0, 1.0);
 }
 
-//TERRAIN MARCHING
-
-float height(vec2 p)
-{
-    return sin(p.x) * sin(p.y);
-}
-
-bool terrain_hit(vec3 ro, vec3 rd, inout float resT )
-{
-    float dt = 0.01f;
-    const float mint = 1.0f;
-    const float maxt = 1000.0f;
-    float lh = 0.0f;
-    float ly = 0.0f;
-    for( float t = mint; t < maxt; t += dt )
-    {
-        vec3  p = ro + rd*t;
-        float h = height(p.xz);
-        if( p.y < h )
-        {
-            // interpolate the intersection distance
-            resT = t - dt + dt*(lh-ly)/(p.y-ly-h+lh);
-            return true;
-        }
-        // allow the error to be proportinal to the distance
-        dt = 0.01f*t;
-        lh = h;
-        ly = p.y;
-    }
-    return false;
-}
-
-
 
 void main()
 {
-    //vec3 fragment_pos = lower_left + (uv.x * resolution.x) * right + (uv.y * resolution.y) * up;
-    //vec3 rd = fragment_pos - camera_pos;
-    //rd = normalize(rd);
-   
     //I have also passed uv coordinates in range [0, 1] as texture coordinates. Positions of the fragments can also be determined in this way
     vec2 aspectRatio = vec2(resolution.x / resolution.y, 1.0);
-    vec2 p = aspectRatio * (gl_FragCoord.xy / resolution.xy/2.0 - 0.5);
+    //vec2 p = aspectRatio * (gl_FragCoord.xy / resolution.xy/2.0 - 0.5);
     
     vec3 ro = camera_pos;
     mat3 lookAt = mat3(right, up, -front);
@@ -332,25 +332,25 @@ void main()
     vec3 ord = lookAt * vec3(aspectRatio * (uv - 0.5), -1.0);
     vec3 rd = normalize(ord);
 
-
+    // background sky
     sky_color = texture(skybox, ord).xyz;
+    sun_dir = normalize( vec3(cos(time), 10.0, -sin(time)) );
+    sun = clamp( dot(sun_dir, rd), 0.0, 1.0 );
 
-    float c;
-    bool hit = terrain_hit(ro, rd, c);
-    if(false)
-    {
-        c /= 100;
-        FragColor = vec4(vec3(c), 1.0);
-    }
-    else
-    {
-        vec3 p = ro + ord;
-        vec3 cloud_color = ray_march(ro, rd);
-        // Gamma correction
-        cloud_color = pow(cloud_color, vec3(0.4545));
-        float d_lower = smoothstep(lower_limit - 2, lower_limit, p.y);
-        float d_upper = 1.0 - smoothstep(upper_limit - 2, upper_limit, p.y);
-        FragColor = vec4(cloud_color, d_lower * 0.9);
-    }
+    vec3 p = ro + ord;
+    //Without Lighting
+    //vec3 cloud_color = ray_march(ro, rd);
+    // Gamma correction
+    //cloud_color = pow(cloud_color, vec3(0.4545));
+    //With Lighthing
+    vec4 col = ray_march_clouds(ro, 1.5 * rd);
+    col.rgb += 0.2 * vec3( 1.0, 0.4, 0.2 ) * pow( sun, 3.0 );
+    float d_lower = smoothstep(lower_limit - 0.5, lower_limit, p.y);
+    float d_upper = 1.0 - smoothstep(upper_limit - 0.5, upper_limit, p.y);
+    //Gamma Correction
+    //col.rgb = pow(res.rgb, vec3(0.4545));
+    FragColor = vec4(col.rgb, col.a * d_lower * d_upper);
+    
+    //FragColor = vec4(color, d_lower * d_upper * 0.7);
     
 }

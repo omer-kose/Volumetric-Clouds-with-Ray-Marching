@@ -5,6 +5,7 @@
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtx/quaternion.hpp>
 #include <GLFW/glfw3.h>
 
 #include "Utilities.h"
@@ -55,11 +56,15 @@ public:
 	void processMouseScroll(float yOffset);
 	void moveCameraUp(double deltaTime, int speedUp);
 	void moveCameraDown(double deltaTime, int speedUp);
+    
+    
+    //Camera Transformations
+    void moveCamera(glm::vec3 direction, double deltaTime, int speedUp);
 
 private:
 	//Updates the orthonormal base of the camera
 	void updateCameraVectors();
-
+    
 private:
 	//Camera Attributes
 	glm::vec3 position;

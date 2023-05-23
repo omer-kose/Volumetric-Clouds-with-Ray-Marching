@@ -156,6 +156,13 @@ void Camera::moveCameraDown(double deltaTime, int speedUp)
 	position -= glm::vec3(0.0, 1.0, 0.0) * velocity;
 }
 
+void Camera::moveCamera(glm::vec3 direction, double deltaTime, int speedUp)
+{
+    float velocity = movementSpeed * deltaTime * speedUp;
+    position += direction * velocity;
+}
+
+
 void Camera::updateCameraVectors()
 {
 	glm::vec3 newFront;
@@ -168,3 +175,4 @@ void Camera::updateCameraVectors()
 	right = glm::normalize(glm::cross(front, worldUp));
 	up = glm::normalize(glm::cross(right, front));
 }
+
