@@ -221,7 +221,7 @@ float fbm(vec3 p)
 {
     vec3 q = p - vec3(0.1, 0.0, 0.0) * time;;
     int numOctaves = 4;
-    float lacunarity = 1.2f;
+    float lacunarity = 1.0f;
     float weight = 1.0;
     float ret = 0.0;
     float frequency = 1.0f;
@@ -282,7 +282,7 @@ vec4 ray_march_clouds(vec3 ro, vec3 rd)
             sum += color * (1.0 - sum.a);
         }
         
-        t += max(STEP_SIZE, 0.02 * t);
+        t += max(STEP_SIZE, STEP_SIZE * (2.0 / 5.0) * t);
     }
     
     return clamp(sum, 0.0f, 1.0f);
@@ -318,6 +318,43 @@ vec3 volumetric_march(vec3 ro, vec3 rd)
 }
 
 
+bool upper_plane_hit(vec3 ro, vec3 rd, inout float t)
+{
+    vec3 n = vec3(0.0, 1.0, 0.0); //Plane normal
+    float cos_alpha = dot(rd, -n);
+    //If alpha > 90 (cos is negative) there is no hit
+    if(cos_alpha <= 0.0)
+    {
+        return false;
+    }
+    else
+    {
+        //There is the hit find the distance between the ro and plane
+        float h = ro.y - upper_limit; //It is guaranteed that ro is above the plane
+        t = h / cos_alpha;
+        return true;
+    }
+}
+
+
+bool lower_plane_hit(vec3 ro, vec3 rd, inout float t)
+{
+    vec3 n = vec3(0.0, -1.0, 0.0); //Plane normal
+    float cos_alpha = dot(rd, -n);
+    //If alpha > 90 (cos is negative) there is no hit
+    if(cos_alpha <= 0.0)
+    {
+        return false;
+    }
+    else
+    {
+        //There is the hit find the distance between the ro and plane
+        float h = lower_limit - ro.y; //It is guaranteed that ro is below the plane
+        t = h / cos_alpha;
+        return true;
+    }
+}
+
 void main()
 {
     //I have also passed uv coordinates in range [0, 1] as texture coordinates. Positions of the fragments can also be determined in this way
@@ -332,25 +369,78 @@ void main()
     vec3 ord = lookAt * vec3(aspectRatio * (uv - 0.5), -1.0);
     vec3 rd = normalize(ord);
 
-    // background sky
+    // background sky and sun
     sky_color = texture(skybox, ord).xyz;
     sun_dir = normalize( vec3(cos(time), 10.0, -sin(time)) );
     sun = clamp( dot(sun_dir, rd), 0.0, 1.0 );
 
-    vec3 p = ro + ord;
+    vec3 p = ro + 1.5 * ord;
+    
+    
     //Without Lighting
     //vec3 cloud_color = ray_march(ro, rd);
     // Gamma correction
     //cloud_color = pow(cloud_color, vec3(0.4545));
-    //With Lighthing
-    vec4 col = ray_march_clouds(ro, 1.5 * rd);
-    col.rgb += 0.2 * vec3( 1.0, 0.4, 0.2 ) * pow( sun, 3.0 );
-    float d_lower = smoothstep(lower_limit - 0.5, lower_limit, p.y);
-    float d_upper = 1.0 - smoothstep(upper_limit - 0.5, upper_limit, p.y);
-    //Gamma Correction
-    //col.rgb = pow(res.rgb, vec3(0.4545));
-    FragColor = vec4(col.rgb, col.a * d_lower * d_upper);
-    
     //FragColor = vec4(color, d_lower * d_upper * 0.7);
     
+    //With Lighthing
+    //vec4 col = ray_march_clouds(ro, 1.5 * rd);
+    //Sun Flare
+    //col.rgb += 0.2 * vec3( 1.0, 0.4, 0.2 ) * pow( sun, 3.0 );
+    //float d_lower = smoothstep(lower_limit - 0.5, lower_limit, p.y);
+    //float d_upper = 1.0 - smoothstep(upper_limit - 0.5, upper_limit, p.y);
+    //Gamma Correction
+    //col.rgb = pow(res.rgb, vec3(0.4545));
+    //FragColor = vec4(col.rgb, col.a * d_lower * d_upper);
+   
+    bool below = ro.y < lower_limit;
+    bool above = ro.y > upper_limit;
+    vec4 col;
+    if(!below && !above) //Camera is in between the cloud slab
+    {
+        col = ray_march_clouds(ro, rd);
+    }
+    else
+    {
+        if(above)
+        {
+            //Check if the ray sees the clouds
+            float t;
+            bool hit = upper_plane_hit(ro, rd, t);
+            if(hit)
+            {
+                //March the clouds from the hit point
+                col = ray_march_clouds(ro + t * rd, rd);
+                //Fog
+                col.rgb = mix(col.rgb, sky_color, 1.0 - exp(-0.0008 * t * t));
+            }
+            else
+            {
+                discard;
+            }
+        }
+        else //below
+        {
+            //Check if the ray sees the clouds
+            float t;
+            bool hit = lower_plane_hit(ro, rd, t);
+            if(hit)
+            {
+                //March the clouds from the hit point
+                col = ray_march_clouds(ro + t * rd, rd);
+                //Fog
+                col.rgb = mix(col.rgb, sky_color, 1.0 - exp(-0.0008 * t * t));
+
+            }
+            else
+            {
+                discard;
+            }
+            
+        }
+    }
+    
+    //Sun Flare
+    col.rgb += 0.2 * vec3( 1.0, 0.4, 0.2 ) * pow( sun, 3.0 );
+    FragColor = vec4(col);
 }
